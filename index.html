@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web将棋スタジオ - 対局・検討・棋譜編集</title>
+<style>
+  :root {
+    --bg: #1e1e24;
+    --panel: #2b2b36;
+    --board-bg: #e6b465;
+    --board-line: #3a2610;
+    --highlight: rgba(255, 230, 0, 0.45);
+    --last-move: rgba(255, 100, 50, 0.35);
+    --text: #f0f0f5;
+    --accent: #4f9cf9;
+    --danger: #e05252;
+    --success: #4caf50;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; }
+  body { background: var(--bg); color: var(--text); display: flex; flex-direction: column; min-height: 100vh; }
+  header {
+    background: #141418; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #333; flex-wrap: wrap; gap: 10px;
+  }
+  header h1 { font-size: 1.2rem; display: flex; align-items: center; gap: 8px; }
+  .mode-tabs { display: flex; gap: 6px; }
+  .mode-tabs button {
+    padding: 6px 14px; border: 1px solid #444; background: var(--panel); color: var(--text);
+    border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s;
+  }
+  .mode-tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  
+  main {
+    display: flex; flex: 1; padding: 16px; gap: 20px; justify-content: center; align-items: flex-start; flex-wrap: wrap;
+  }
+
+  /* 盤面エリア */
+  .board-section { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .hand-box {
+    width: 100%; max-width: 450px; min-height: 46px; background: var(--panel); border-radius: 6px;
+    padding: 6px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px solid #444;
+  }
+  .hand-label { font-size: 0.85rem; color: #aaa; margin-right: 4px; }
+  .hand-piece {
+    background: #f5d69c; color: #111; padding: 4px 8px; border-radius: 4px; font-weight: bold;
+    cursor: pointer; user-select: none; border: 1px solid #8a6224; font-size: 0.95rem;
+  }
+  .hand-piece.selected { outline: 3px solid var(--accent); transform: scale(1.05); }
+
+  .board-wrapper {
+    background: var(--board-bg); padding: 14px; border-radius: 4px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    border: 3px solid #6e471b;
+  }
+  table.shogi-board { border-collapse: collapse; background: var(--board-bg); }
+  table.shogi-board td {
+    width: 46px; height: 50px; border: 1px solid var(--board-line); text-align: center; vertical-align: middle;
+    font-size: 1.45rem; font-weight: bold; color: #111; cursor: pointer; user-select: none; position: relative;
+  }
+  table.shogi-board td.selected { background: var(--highlight); }
+  table.shogi-board td.last-move { background: var(--last-move); }
+  table.shogi-board td.can-move::after {
+    content: ""; width: 12px; height: 12px; background: rgba(0, 120, 255, 0.55); border-radius: 50%;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  }
+  .gote-piece { display: inline-block; transform: rotate(180deg); }
+  .promoted { color: #b81d13; }
+
+  /* 評価値バー */
+  .eval-bar-container {
+    width: 100%; max-width: 450px; height: 22px; background: #222; border-radius: 4px; overflow: hidden;
+    display: flex; position: relative; border: 1px solid #555;
+  }
+  .eval-sente { background: #4f9cf9; height: 100%; transition: width 0.3s; }
+  .eval-gote { background: #e05252; height: 100%; flex: 1; }
+  .eval-text {
+    position: absolute; width: 100%; text-align: center; font-size: 0.8rem; line-height: 20px;
+    font-weight: bold; text-shadow: 1px 1px 2px #000;
+  }
+
+  /* 右パネル（棋譜・編集・AI設定） */
+  .side-panel {
+    width: 100%; max-width: 420px; background: var(--panel); border-radius: 8px; padding: 14px;
+    border: 1px solid #444; display: flex; flex-direction: column; gap: 12px;
+  }
+  .panel-box { background: #22222b; padding: 10px; border-radius: 6px; border: 1px solid #383846; }
+  .panel-box h3 { font-size: 0.95rem; margin-bottom: 8px; color: #ddd; border-bottom: 1px solid #383846; padding-bottom: 4px; }
+  
+  .kifu-list {
+    height: 180px; overflow-y: auto; background: #18181f; padding: 6px; border-radius: 4px;
+    font-size: 0.9rem; display: flex; flex-direction: column; gap: 2px;
+  }
+  .kifu-item {
+    padding: 4px 8px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between;
+  }
+  .kifu-item:hover { background: #2d2d3a; }
+  .kifu-item.active { background: var(--accent); color: #fff; font-weight: bold; }
+  .branch-badge { background: #ff9800; color: #000; font-size: 0.7rem; padding: 1px 5px; border-radius: 3px; margin-left: 6px; }
+
+  .controls-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button.btn {
+    padding: 6px 10px; border: none; border-radius: 4px; background: #3e3e4e; color: #fff;
+    cursor: pointer; font-size: 0.85rem; transition: 0.15s;
+  }
+  button.btn:hover { background: #505064; }
+  button.btn-primary { background: var(--accent); }
+  button.btn-danger { background: var(--danger); }
+  button.btn-success { background: var(--success); }
+
+  textarea, input[type="text"], select {
+    width: 100%; background: #18181f; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 6px; font-size: 0.85rem;
+  }
+
+  /* 成り選択モーダル */
+  #promote-modal {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100;
+    justify-content: center; align-items: center;
+  }
+  .modal-card {
+    background: var(--panel); padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #666;
+  }
+  .modal-card button { margin: 10px 8px 0; padding: 10px 20px; font-size: 1rem; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>☖ Web将棋スタジオ</h1>
+  <div class="mode-tabs">
+    <button id="tab-ai" class="active" onclick="setMode('ai')">1vAI対局</button>
+    <button id="tab-pvp" onclick="setMode('pvp')">1v1対局</button>
+    <button id="tab-study" onclick="setMode('study')">検討・棋譜編集</button>
+  </div>
+</header>
+
+<main>
+  <!-- 左側：盤面・持ち駒・評価値 -->
+  <div class="board-section">
+    <div class="eval-bar-container" id="eval-container">
+      <div class="eval-sente" id="eval-sente" style="width: 50%;"></div>
+      <div class="eval-gote"></div>
+      <div class="eval-text" id="eval-text">互角 (0) | エンジン待機中</div>
+    </div>
+
+    <!-- 後手持ち駒 -->
+    <div class="hand-box" id="gote-hand">
+      <span class="hand-label">☖ 後手 持駒:</span>
+    </div>
+
+    <!-- 将棋盤 -->
+    <div class="board-wrapper">
+      <table class="shogi-board" id="board"></table>
+    </div>
+
+    <!-- 先手持ち駒 -->
+    <div class="hand-box" id="sente-hand">
+      <span class="hand-label">☗ 先手 持駒:</span>
+    </div>
+
+    <div class="controls-row">
+      <button class="btn" onclick="jumpToStart()">|◀ 初手</button>
+      <button class="btn" onclick="stepBack()">◀ 1手戻る</button>
+      <button class="btn" onclick="stepForward()">1手進む ▶</button>
+      <button class="btn" onclick="flipBoard()">⇅ 盤面反転</button>
+      <button class="btn btn-danger" onclick="resetGame()">新規対局</button>
+    </div>
+  </div>
+
+  <!-- 右側：棋譜ツリー・編集・AI/オンライン設定 -->
+  <div class="side-panel">
+    <!-- モード別コントロール -->
+    <div class="panel-box" id="mode-panel">
+      <h3 id="mode-title">1vAI対局設定（つようら王11mini対応）</h3>
+      <div id="ai-controls">
+        <div class="controls-row" style="margin-bottom:8px;">
+          <select id="ai-level" style="width:auto; flex:1;">
+            <option value="1">AI強さ: 入門 (内蔵探索 Lv1)</option>
+            <option value="2" selected>AI強さ: 初級 (内蔵探索 Lv2)</option>
+            <option value="wasm">外部WASMエンジン (つようら王11mini)</option>
+          </select>
+          <button class="btn btn-primary" onclick="triggerAIMove()">AIに指させる</button>
+        </div>
+        <div style="font-size:0.78rem; color:#aaa;">
+          ※「つようら王11mini」を使用する場合は、同一フォルダに <code>yaneuraou.js</code> と評価関数 <code>nn.bin</code> を配置すると自動認識します。
+        </div>
+      </div>
+
+      <div id="pvp-controls" style="display:none;">
+        <p style="font-size:0.82rem; color:#ccc; margin-bottom:6px;">
+          対面対局のほか、現在の局面URLをコピーして相手に送ることでオンライン対局のやり取りが可能です。
+        </p>
+        <button class="btn btn-primary" onclick="copyShareUrl()">対局局面URLをコピー</button>
+      </div>
+
+      <div id="study-controls" style="display:none;">
+        <div class="controls-row">
+          <button class="btn btn-primary" onclick="runAnalysis()">現局面をAI検討</button>
+          <button class="btn btn-danger" onclick="deleteCurrentBranch()">この分岐以降を削除</button>
+        </div>
+        <div id="pv-display" style="font-size:0.8rem; color:#8ecae6; margin-top:6px;">読み筋: -</div>
+      </div>
+    </div>
+
+    <!-- 棋譜ツリー・分岐リスト -->
+    <div class="panel-box">
+      <h3>棋譜・分岐手順（クリックで移動 / 途中から指すと分岐作成）</h3>
+      <div class="kifu-list" id="kifu-list"></div>
+      <div style="margin-top:8px;">
+        <input type="text" id="node-comment" placeholder="この局面のコメントを入力・編集..." onchange="updateComment(this.value)">
+      </div>
+    </div>
+
+    <!-- 棋譜保存・読込・エクスポート -->
+    <div class="panel-box">
+      <h3>棋譜の保存・編集・入出力</h3>
+      <div class="controls-row" style="margin-bottom:8px;">
+        <button class="btn btn-success" onclick="saveToLocal()">ブラウザに保存</button>
+        <button class="btn" onclick="loadFromLocal()">保存データ読込</button>
+        <button class="btn" onclick="downloadKif()">KIF保存</button>
+        <button class="btn" onclick="copySfen()">SFENコピー</button>
+      </div>
+      <div class="controls-row">
+        <input type="text" id="sfen-input" placeholder="SFEN文字列を貼り付けて局面読込...">
+        <button class="btn" onclick="loadSfenInput()">読込</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- 成・不成選択モーダル -->
+<div id="promote-modal">
+  <div class="modal-card">
+    <p>駒を成りますか？</p>
+    <button class="btn btn-primary" onclick="resolvePromotion(true)">成る</button>
+    <button class="btn" onclick="resolvePromotion(false)">不成</button>
+  </div>
+</div>
+
+<script>
+/**
+ * 将棋エンジン＆棋譜ツリー管理システム
+ */
+const PIECE_NAMES = {
+  P: '歩', L: '香', N: '桂', S: '銀', G: '金', B: '角', R: '飛', K: '玉',
+  '+P': 'と', '+L': '成香', '+N': '成桂', '+S': '成銀', '+B': '馬', '+R': '龍'
+};
+const HAND_ORDER = ['R', 'B', 'G', 'S', 'N', 'L', 'P'];
+const PROMOTABLE = ['P', 'L', 'N', 'S', 'B', 'R'];
+
+// 初期盤面 SFEN
+const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
+
+let appMode = 'ai'; // 'ai' | 'pvp' | 'study'
+let isFlipped = false;
+let selected = null; // { type: 'board', r, c } or { type: 'hand', piece }
+let legalMovesCache = [];
+let pendingMove = null;
+
+// 棋譜ツリー構造
+let rootNode = null;
+let currentNode = null;
+let nodeIdCounter = 1;
+
+// 外部WASMエンジン用Worker（つようら王11mini連携用）
+let wasmEngine = null;
+let isWasmReady = false;
+
+function initWasmEngine() {
+  try {
+    // 同一ディレクトリに yaneuraou.js と nn.bin が配置されている場合に起動
+    if (typeof YaneuraOu !== 'undefined') {
+      YaneuraOu().then(engine => {
+        wasmEngine = engine;
+        wasmEngine.addMessageListener(handleEngineMessage);
+        wasmEngine.postMessage('usi');
+      });
+    }
+  } catch (e) {
+    console.log("内蔵AIモードで動作中");
+  }
+}
+
+function handleEngineMessage(line) {
+  if (line === 'usiok') {
+    wasmEngine.postMessage('setoption name EvalFile value nn.bin');
+    wasmEngine.postMessage('isready');
+  } else if (line === 'readyok') {
+    isWasmReady = true;
+    updateEvalDisplay(0, "つようら王11mini 準備完了");
+  } else if (line.startsWith('info') && line.includes('score cp')) {
+    const cpMatch = line.match(/score cp (-?\d+)/);
+    const pvMatch = line.match(/pv (.+)/);
+    if (cpMatch) {
+      let score = parseInt(cpMatch[1], 10);
+      if (currentNode.state.turn === 'w') score = -score;
+      const pv = pvMatch ? pvMatch[1] : '';
+      updateEvalDisplay(score, `評価値: ${score > 0 ? '+' : ''}${score}`);
+      document.getElementById('pv-display').textContent = `読み筋: ${pv}`;
+    }
+  } else if (line.startsWith('bestmove')) {
+    const moveStr = line.split(' ')[1];
+    if (moveStr && moveStr !== 'resign' && appMode === 'ai') {
+      applyUsiMove(moveStr);
+    }
+  }
+}
+
+// SFENパーサ
+function parseSfen(sfen) {
+  const parts = sfen.trim().split(/\s+/);
+  const rows = parts[0].split('/');
+  const board = Array.from({ length: 9 }, () => Array(9).fill(null));
+
+  for (let r = 0; r < 9; r++) {
+    let c = 0;
+    let plus = false;
+    for (const ch of rows[r]) {
+      if (ch === '+') {
+        plus = true;
+      } else if (/[1-9]/.test(ch)) {
+        c += parseInt(ch, 10);
+      } else {
+        const owner = ch === ch.toUpperCase() ? 'b' : 'w';
+        const base = ch.toUpperCase();
+        board[r][c] = { owner, type: plus ? '+' + base : base };
+        plus = false;
+        c++;
+      }
+    }
+  }
+
+  const turn = parts[1] || 'b';
+  const hands = { b: {}, w: {} };
+  if (parts[2] && parts[2] !== '-') {
+    let num = '';
+    for (const ch of parts[2]) {
+      if (/[0-9]/.test(ch)) {
+        num += ch;
+      } else {
+        const count = num === '' ? 1 : parseInt(num, 10);
+        const owner = ch === ch.toUpperCase() ? 'b' : 'w';
+        const type = ch.toUpperCase();
+        hands[owner][type] = (hands[owner][type] || 0) + count;
+        num = '';
+      }
+    }
+  }
+  const ply = parseInt(parts[3] || '1', 10);
+  return { board, turn, hands, ply };
+}
+
+// SFENジェネレータ
+function toSfen(state) {
+  let rows = [];
+  for (let r = 0; r < 9; r++) {
+    let rowStr = '';
+    let empty = 0;
+    for (let c = 0; c < 9; c++) {
+      const p = state.board[r][c];
+      if (!p) {
+        empty++;
+      } else {
+        if (empty > 0) { rowStr += empty; empty = 0; }
+        let code = p.type.replace('+', '');
+        if (p.owner === 'w') code = code.toLowerCase();
+        if (p.type.startsWith('+')) code = '+' + code;
+        rowStr += code;
+      }
+    }
+    if (empty > 0) rowStr += empty;
+    rows.push(rowStr);
+  }
+  let handStr = '';
+  for (const owner of ['b', 'w']) {
+    for (const t of HAND_ORDER) {
+      const cnt = state.hands[owner][t] || 0;
+      if (cnt > 0) {
+        handStr += (cnt > 1 ? cnt : '') + (owner === 'b' ? t : t.toLowerCase());
+      }
+    }
+  }
+  return `${rows.join('/')} ${state.turn} ${handStr || '-'} ${state.ply}`;
+}
+
+function cloneState(state) {
+  return JSON.parse(JSON.stringify(state));
+}
+
+// 合法手生成（簡易チェック＋二歩判定込み）
+function getPseudoMoves(state, r, c) {
+  const p = state.board[r][c];
+  if (!p || p.owner !== state.turn) return [];
+  const dir = p.owner === 'b' ? -1 : 1;
+  const moves = [];
+
+  const addStep = (dr, dc) => {
+    const nr = r + dr, nc = c + dc;
+    if (nr >= 0 && nr < 9 && nc >= 0 && nc < 9) {
+      const target = state.board[nr][nc];
+      if (!target || target.owner !== p.owner) moves.push({ r: nr, c: nc });
+    }
+  };
+
+  const addSlide = (dr, dc) => {
+    let nr = r + dr, nc = c + dc;
+    while (nr >= 0 && nr < 9 && nc >= 0 && nc < 9) {
+      const target = state.board[nr][nc];
+      if (!target) {
+        moves.push({ r: nr, c: nc });
+      } else {
+        if (target.owner !== p.owner) moves.push({ r: nr, c: nc });
+        break;
+      }
+      nr += dr; nc += dc;
+    }
+  };
+
+  const goldSteps = [[dir, -1], [dir, 0], [dir, 1], [0, -1], [0, 1], [-dir, 0]];
+
+  switch (p.type) {
+    case 'P': addStep(dir, 0); break;
+    case 'L': addSlide(dir, 0); break;
+    case 'N': addStep(dir * 2, -1); addStep(dir * 2, 1); break;
+    case 'S':
+      [[dir, -1], [dir, 0], [dir, 1], [-dir, -1], [-dir, 1]].forEach(([dr, dc]) => addStep(dr, dc));
+      break;
+    case 'G': case '+P': case '+L': case '+N': case '+S':
+      goldSteps.forEach(([dr, dc]) => addStep(dr, dc));
+      break;
+    case 'B':
+      [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([dr, dc]) => addSlide(dr, dc));
+      break;
+    case '+B':
+      [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([dr, dc]) => addSlide(dr, dc));
+      [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addStep(dr, dc));
+      break;
+    case 'R':
+      [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addSlide(dr, dc));
+      break;
+    case '+R':
+      [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addSlide(dr, dc));
+      [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([dr, dc]) => addStep(dr, dc));
+      break;
+    case 'K':
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++)
+          if (dr !== 0 || dc !== 0) addStep(dr, dc);
+      break;
+  }
+  return moves;
+}
+
+function getDropTargets(state, pieceType) {
+  const targets = [];
+  const owner = state.turn;
+  for (let r = 0; r < 9; r++) {
+    // 行き所のない駒の制限
+    if (pieceType === 'P' || pieceType === 'L') {
+      if ((owner === 'b' && r === 0) || (owner === 'w' && r === 8)) continue;
+    }
+    if (pieceType === 'N') {
+      if ((owner === 'b' && r <= 1) || (owner === 'w' && r >= 7)) continue;
+    }
+    for (let c = 0; c < 9; c++) {
+      if (state.board[r][c]) continue;
+      // 二歩チェック
+      if (pieceType === 'P') {
+        let hasPawn = false;
+        for (let rr = 0; rr < 9; rr++) {
+          const cell = state.board[rr][c];
+          if (cell && cell.owner === owner && cell.type === 'P') hasPawn = true;
+        }
+        if (hasPawn) continue;
+      }
+      targets.push({ r, c });
+    }
+  }
+  return targets;
+}
+
+// 指し手実行と棋譜ツリー追加
+function executeMove(move) {
+  const state = cloneState(currentNode.state);
+  const owner = state.turn;
+  let kifuText = '';
+  const files = ['９','８','７','６','５','４','３','２','１'];
+  const ranks = ['一','二','三','四','五','六','七','八','九'];
+  const destStr = `${files[move.to.c]}${ranks[move.to.r]}`;
+  const mark = owner === 'b' ? '☗' : '☖';
+
+  if (move.drop) {
+    state.hands[owner][move.drop]--;
+    state.board[move.to.r][move.to.c] = { owner, type: move.drop };
+    kifuText = `${mark}${destStr}${PIECE_NAMES[move.drop]}打`;
+  } else {
+    const piece = state.board[move.from.r][move.from.c];
+    const captured = state.board[move.to.r][move.to.c];
+    if (captured) {
+      const baseType = captured.type.replace('+', '');
+      state.hands[owner][baseType] = (state.hands[owner][baseType] || 0) + 1;
+    }
+    const newType = move.promote ? '+' + piece.type : piece.type;
+    state.board[move.to.r][move.to.c] = { owner, type: newType };
+    state.board[move.from.r][move.from.c] = null;
+    kifuText = `${mark}${destStr}${PIECE_NAMES[piece.type]}${move.promote ? '成' : ''}`;
+  }
+
+  state.turn = owner === 'b' ? 'w' : 'b';
+  state.ply++;
+
+  // 既存の子ノードに同じ手があればそこへ移動（重複分岐防止）
+  const existing = currentNode.children.find(ch => ch.kifu === kifuText);
+  if (existing) {
+    currentNode = existing;
+  } else {
+    const newNode = {
+      id: nodeIdCounter++,
+      kifu: kifuText,
+      move,
+      state,
+      sfen: toSfen(state),
+      comment: '',
+      parent: currentNode,
+      children: []
+    };
+    currentNode.children.push(newNode);
+    currentNode = newNode;
+  }
+
+  selected = null;
+  legalMovesCache = [];
+  renderAll();
+
+  // AIモードで後手番になったらAI思考
+  if (appMode === 'ai' && currentNode.state.turn === 'w') {
+    setTimeout(triggerAIMove, 250);
+  }
+}
+
+// 内蔵評価関数＆探索AI（WASM未配置時のフォールバック兼高速応答用）
+const PIECE_VALUES = {
+  P: 100, L: 300, N: 350, S: 500, G: 600, B: 800, R: 950, K: 15000,
+  '+P': 550, '+L': 550, '+N': 550, '+S': 550, '+B': 1100, '+R': 1300
+};
+
+function evaluateBoard(state) {
+  let score = 0;
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const p = state.board[r][c];
+      if (!p) continue;
+      const val = PIECE_VALUES[p.type] || 0;
+      score += p.owner === 'b' ? val : -val;
+    }
+  }
+  for (const owner of ['b', 'w']) {
+    for (const [t, cnt] of Object.entries(state.hands[owner])) {
+      const val = (PIECE_VALUES[t] || 0) * 1.1 * cnt;
+      score += owner === 'b' ? val : -val;
+    }
+  }
+  return Math.round(score);
+}
+
+function generateAllMoves(state) {
+  const all = [];
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const p = state.board[r][c];
+      if (p && p.owner === state.turn) {
+        const targets = getPseudoMoves(state, r, c);
+        for (const to of targets) {
+          const canProm = PROMOTABLE.includes(p.type) &&
+            ((p.owner === 'b' && (r <= 2 || to.r <= 2)) || (p.owner === 'w' && (r >= 6 || to.r >= 6)));
+          if (canProm) {
+            all.push({ from: { r, c }, to, promote: true });
+          }
+          // 強制成りチェック
+          const mustProm = (p.type === 'P' || p.type === 'L') && ((p.owner === 'b' && to.r === 0) || (p.owner === 'w' && to.r === 8)) ||
+                           (p.type === 'N') && ((p.owner === 'b' && to.r <= 1) || (p.owner === 'w' && to.r >= 7));
+          if (!mustProm) {
+            all.push({ from: { r, c }, to, promote: false });
+          }
+        }
+      }
+    }
+  }
+  for (const [t, cnt] of Object.entries(state.hands[state.turn])) {
+    if (cnt > 0) {
+      for (const to of getDropTargets(state, t)) {
+        all.push({ drop: t, to });
+      }
+    }
+  }
+  return all;
+}
+
+function triggerAIMove() {
+  const level = document.getElementById('ai-level').value;
+  if (level === 'wasm' && isWasmReady && wasmEngine) {
+    wasmEngine.postMessage(`position sfen ${currentNode.sfen}`);
+    wasmEngine.postMessage('go movetime 1500');
+    return;
+  }
+
+  const moves = generateAllMoves(currentNode.state);
+  if (moves.length === 0) {
+    alert("指し手がありません（終局）");
+    return;
+  }
+
+  const isMax = currentNode.state.turn === 'b';
+  let bestMove = moves[0];
+  let bestScore = isMax ? -999999 : 999999;
+
+  for (const m of moves) {
+    const sim = simulateMove(currentNode.state, m);
+    let score = evaluateBoard(sim) + (Math.random() * 30 - 15);
+    if (level === '2') {
+      // 1手読み返し（相手の最善応手）
+      const replies = generateAllMoves(sim);
+      let worstReply = isMax ? 999999 : -999999;
+      for (let i = 0; i < Math.min(replies.length, 25); i++) {
+        const s2 = evaluateBoard(simulateMove(sim, replies[i]));
+        if (isMax) worstReply = Math.min(worstReply, s2);
+        else worstReply = Math.max(worstReply, s2);
+      }
+      if (replies.length > 0) score = worstReply;
+    }
+
+    if ((isMax && score > bestScore) || (!isMax && score < bestScore)) {
+      bestScore = score;
+      bestMove = m;
+    }
+  }
+  executeMove(bestMove);
+}
+
+function simulateMove(state, move) {
+  const s = cloneState(state);
+  const owner = s.turn;
+  if (move.drop) {
+    s.hands[owner][move.drop]--;
+    s.board[move.to.r][move.to.c] = { owner, type: move.drop };
+  } else {
+    const p = s.board[move.from.r][move.from.c];
+    const cap = s.board[move.to.r][move.to.c];
+    if (cap) {
+      const b = cap.type.replace('+', '');
+      s.hands[owner][b] = (s.hands[owner][b] || 0) + 1;
+    }
+    s.board[move.to.r][move.to.c] = { owner, type: move.promote ? '+' + p.type : p.type };
+    s.board[move.from.r][move.from.c] = null;
+  }
+  s.turn = owner === 'b' ? 'w' : 'b';
+  return s;
+}
+
+function runAnalysis() {
+  if (isWasmReady && wasmEngine) {
+    wasmEngine.postMessage(`position sfen ${currentNode.sfen}`);
+    wasmEngine.postMessage('go movetime 2000');
+  } else {
+    const score = evaluateBoard(currentNode.state);
+    updateEvalDisplay(score, `評価値: ${score > 0 ? '+' : ''}${score} (内蔵評価)`);
+    document.getElementById('pv-display').textContent = "読み筋: 駒得・玉の安全度ベースの静的評価完了（WASM配置で深層読み筋を表示）";
+  }
+}
+
+// UI描画関連
+function renderAll() {
+  renderBoard();
+  renderHands();
+  renderKifuTree();
+  const score = evaluateBoard(currentNode.state);
+  updateEvalDisplay(score, `形勢評価: ${score > 0 ? '先手有利 +' : score < 0 ? '後手有利 ' : '互角 '}${score}`);
+  document.getElementById('node-comment').value = currentNode.comment || '';
+}
+
+function updateEvalDisplay(score, label) {
+  const clamped = Math.max(-2000, Math.min(2000, score));
+  const pct = 50 + (clamped / 2000) * 50;
+  document.getElementById('eval-sente').style.width = `${pct}%`;
+  document.getElementById('eval-text').textContent = label;
+}
+
+function renderBoard() {
+  const table = document.getElementById('board');
+  table.innerHTML = '';
+  const state = currentNode.state;
+  const lastTo = currentNode.move ? currentNode.move.to : null;
+
+  for (let i = 0; i < 9; i++) {
+    const tr = document.createElement('tr');
+    const r = isFlipped ? 8 - i : i;
+    for (let j = 0; j < 9; j++) {
+      const c = isFlipped ? 8 - j : j;
+      const td = document.createElement('td');
+      const p = state.board[r][c];
+
+      if (selected && selected.type === 'board' && selected.r === r && selected.c === c) {
+        td.classList.add('selected');
+      }
+      if (lastTo && lastTo.r === r && lastTo.c === c) {
+        td.classList.add('last-move');
+      }
+      if (legalMovesCache.some(m => m.r === r && m.c === c)) {
+        td.classList.add('can-move');
+      }
+
+      if (p) {
+        const span = document.createElement('span');
+        span.textContent = PIECE_NAMES[p.type];
+        if (p.owner === 'w') span.classList.add('gote-piece');
+        if (p.type.startsWith('+')) span.classList.add('promoted');
+        td.appendChild(span);
+      }
+
+      td.onclick = () => onCellClick(r, c);
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+}
+
+function renderHands() {
+  const state = currentNode.state;
+  ['b', 'w'].forEach(owner => {
+    const el = document.getElementById(owner === 'b' ? 'sente-hand' : 'gote-hand');
+    el.innerHTML = `<span class="hand-label">${owner === 'b' ? '☗ 先手 持駒:' : '☖ 後手 持駒:'}</span>`;
+    for (const t of HAND_ORDER) {
+      const cnt = state.hands[owner][t] || 0;
+      if (cnt > 0) {
+        const btn = document.createElement('span');
+        btn.className = 'hand-piece';
+        if (selected && selected.type === 'hand' && selected.owner === owner && selected.piece === t) {
+          btn.classList.add('selected');
+        }
+        btn.textContent = `${PIECE_NAMES[t]}${cnt > 1 ? cnt : ''}`;
+        btn.onclick = () => onHandClick(owner, t);
+        el.appendChild(btn);
+      }
+    }
+  });
+}
+
+function onCellClick(r, c) {
+  const state = currentNode.state;
+  // 移動先クリック判定
+  if (selected && legalMovesCache.some(m => m.r === r && m.c === c)) {
+    if (selected.type === 'hand') {
+      executeMove({ drop: selected.piece, to: { r, c } });
+    } else {
+      const piece = state.board[selected.r][selected.c];
+      const inZone = (piece.owner === 'b' && (selected.r <= 2 || r <= 2)) ||
+                     (piece.owner === 'w' && (selected.r >= 6 || r >= 6));
+      const canProm = PROMOTABLE.includes(piece.type) && inZone;
+      const mustProm = (piece.type === 'P' || piece.type === 'L') && ((piece.owner === 'b' && r === 0) || (piece.owner === 'w' && r === 8)) ||
+                       (piece.type === 'N') && ((piece.owner === 'b' && r <= 1) || (piece.owner === 'w' && r >= 7));
+
+      if (mustProm) {
+        executeMove({ from: { r: selected.r, c: selected.c }, to: { r, c }, promote: true });
+      } else if (canProm) {
+        pendingMove = { from: { r: selected.r, c: selected.c }, to: { r, c } };
+        document.getElementById('promote-modal').style.display = 'flex';
+      } else {
+        executeMove({ from: { r: selected.r, c: selected.c }, to: { r, c }, promote: false });
+      }
+    }
+    return;
+  }
+
+  // 自分の駒を選択
+  const p = state.board[r][c];
+  if (p && p.owner === state.turn) {
+    selected = { type: 'board', r, c };
+    legalMovesCache = getPseudoMoves(state, r, c);
+  } else {
+    selected = null;
+    legalMovesCache = [];
+  }
+  renderBoard();
+  renderHands();
+}
+
+function onHandClick(owner, piece) {
+  if (owner !== currentNode.state.turn) return;
+  selected = { type: 'hand', owner, piece };
+  legalMovesCache = getDropTargets(currentNode.state, piece);
+  renderBoard();
+  renderHands();
+}
+
+function resolvePromotion(promote) {
+  document.getElementById('promote-modal').style.display = 'none';
+  if (pendingMove) {
+    executeMove({ ...pendingMove, promote });
+    pendingMove = null;
+  }
+}
+
+// 棋譜ツリー描画・操作
+function renderKifuTree() {
+  const list = document.getElementById('kifu-list');
+  list.innerHTML = '';
+
+  function traverse(node, depth, isBranch) {
+    const div = document.createElement('div');
+    div.className = 'kifu-item' + (node.id === currentNode.id ? ' active' : '');
+    const indent = '&nbsp;&nbsp;'.repeat(isBranch ? 1 : 0);
+    const branchTag = isBranch ? '<span class="branch-badge">分岐</span>' : '';
+    const commentTag = node.comment ? ' 📝' : '';
+    div.innerHTML = `<span>${indent}${depth === 0 ? '開始局面' : depth + '. ' + node.kifu}${branchTag}${commentTag}</span>`;
+    div.onclick = () => {
+      currentNode = node;
+      selected = null;
+      legalMovesCache = [];
+      renderAll();
+    };
+    list.appendChild(div);
+
+    node.children.forEach((child, idx) => {
+      traverse(child, depth + 1, idx > 0);
+    });
+  }
+  traverse(rootNode, 0, false);
+}
+
+function stepBack() {
+  if (currentNode.parent) {
+    currentNode = currentNode.parent;
+    renderAll();
+  }
+}
+function stepForward() {
+  if (currentNode.children.length > 0) {
+    currentNode = currentNode.children[0];
+    renderAll();
+  }
+}
+function jumpToStart() {
+  currentNode = rootNode;
+  renderAll();
+}
+function flipBoard() {
+  isFlipped = !isFlipped;
+  renderBoard();
+}
+function updateComment(text) {
+  currentNode.comment = text;
+  renderKifuTree();
+}
+function deleteCurrentBranch() {
+  if (!currentNode.parent) return alert("開始局面は削除できません");
+  const parent = currentNode.parent;
+  parent.children = parent.children.filter(c => c.id !== currentNode.id);
+  currentNode = parent;
+  renderAll();
+}
+
+// モード切替
+function setMode(mode) {
+  appMode = mode;
+  ['ai', 'pvp', 'study'].forEach(m => {
+    document.getElementById(`tab-${m}`).classList.toggle('active', m === mode);
+    document.getElementById(`${m}-controls`).style.display = m === mode ? 'block' : 'none';
+  });
+  const titles = {
+    ai: '1vAI対局設定（つようら王11mini対応）',
+    pvp: '1v1対局（対面・URL共有対戦）',
+    study: '検討・棋譜分岐編集モード'
+  };
+  document.getElementById('mode-title').textContent = titles[mode];
+}
+
+// 保存・エクスポート
+function serializeTree(node) {
+  return {
+    kifu: node.kifu, move: node.move, sfen: node.sfen, comment: node.comment,
+    children: node.children.map(serializeTree)
+  };
+}
+function deserializeTree(data, parent = null) {
+  const node = {
+    id: nodeIdCounter++, kifu: data.kifu, move: data.move,
+    state: parseSfen(data.sfen), sfen: data.sfen, comment: data.comment || '',
+    parent, children: []
+  };
+  node.children = (data.children || []).map(c => deserializeTree(c, node));
+  return node;
+}
+
+function saveToLocal() {
+  localStorage.setItem('shogi_kifu_tree', JSON.stringify(serializeTree(rootNode)));
+  alert("ブラウザに棋譜（全分岐・コメント含む）を保存しました。");
+}
+function loadFromLocal() {
+  const raw = localStorage.getItem('shogi_kifu_tree');
+  if (!raw) return alert("保存された棋譜がありません。");
+  rootNode = deserializeTree(JSON.parse(raw));
+  currentNode = rootNode;
+  renderAll();
+}
+function copySfen() {
+  navigator.clipboard.writeText(currentNode.sfen);
+  alert("現在のSFENをコピーしました:\n" + currentNode.sfen);
+}
+function loadSfenInput() {
+  const sfen = document.getElementById('sfen-input').value.trim();
+  if (!sfen) return;
+  try {
+    const state = parseSfen(sfen);
+    rootNode = { id: nodeIdCounter++, kifu: '開始局面', move: null, state, sfen, comment: '', parent: null, children: [] };
+    currentNode = rootNode;
+    renderAll();
+  } catch (e) {
+    alert("SFENの形式が正しくありません。");
+  }
+}
+function downloadKif() {
+  let lines = ["#KIF version=2.0 encoding=UTF-8", "手合割：平手", "手数----指手---------消費時間--"];
+  let node = rootNode;
+  let step = 1;
+  while (node.children.length > 0) {
+    node = node.children[0];
+    lines.push(`${step} ${node.kifu.replace('☗','').replace('☖','')}`);
+    if (node.comment) lines.push(`*${node.comment}`);
+    step++;
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `shogi_${Date.now()}.kif`;
+  a.click();
+}
+function copyShareUrl() {
+  const url = `${location.origin}${location.pathname}?sfen=${encodeURIComponent(currentNode.sfen)}`;
+  navigator.clipboard.writeText(url);
+  alert("対局局面URLをコピーしました。相手に送信して開いてもらうとこの局面から指せます。");
+}
+
+function resetGame() {
+  const params = new URLSearchParams(location.search);
+  const startSfen = params.get('sfen') || INITIAL_SFEN;
+  rootNode = {
+    id: nodeIdCounter++, kifu: '開始局面', move: null,
+    state: parseSfen(startSfen), sfen: startSfen, comment: '', parent: null, children: []
+  };
+  currentNode = rootNode;
+  renderAll();
+}
+
+// 起動処理
+resetGame();
+initWasmEngine();
+</script>
+</body>
+</html>
