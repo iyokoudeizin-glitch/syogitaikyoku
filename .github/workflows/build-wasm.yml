@@ -1,7 +1,7 @@
 name: Build YaneuraOu WASM
 
 on:
-  workflow_dispatch: # 手動実行ボタンを有効化
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,10 +18,25 @@ jobs:
         with:
           version: 3.1.56
 
-      - name: Compile to WebAssembly (Single Thread / SFNN)
+      - name: Compile to WebAssembly (Auto-detect sources)
         working-directory: YaneuraOu/source
         run: |
+          # 必要なC++ソースファイルを自動収集（テストや他エンジン用を除外）
+          SOURCES=$(find . -name "*.cpp" \
+            ! -path "./test/*" \
+            ! -path "./extra/*" \
+            ! -path "./engine/help-mate-engine/*" \
+            ! -path "./engine/mate-engine/*" \
+            ! -path "./engine/user-engine/*" \
+            ! -path "./eval/material/*" \
+            ! -path "./eval/kppt/*" \
+            ! -path "./eval/kpp_kkpt/*")
+
+          echo "Compiling sources:"
+          echo "$SOURCES"
+
           em++ -O3 -std=c++17 \
+            -I. \
             -DNDEBUG -DIS_64BIT -DUSE_SSE2 -msimd128 \
             -DEVAL_NNUE -DEVAL_NNUE_SFNN \
             -DNO_THREAD \
@@ -29,11 +44,10 @@ jobs:
             -s ALLOW_MEMORY_GROWTH=1 \
             -s MODULARIZE=1 \
             -s EXPORT_NAME="YaneuraOu" \
-            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","addMessageListener","postMessage"]' \
+            -s FORCE_FILESYSTEM=1 \
+            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
             -o yaneuraou.js \
-            main.cpp types.cpp bitboard.cpp misc.cpp movegen.cpp position.cpp \
-            movepick.cpp search.cpp thread.cpp tt.cpp ucioption.cpp \
-            eval/*.cpp eval/nnue/*.cpp eval/nnue/features/*.cpp eval/nnue/architectures/*.cpp
+            $SOURCES
 
       - name: Upload WASM Artifacts
         uses: actions/upload-artifact@v4
