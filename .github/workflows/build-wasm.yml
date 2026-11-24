@@ -18,24 +18,44 @@ jobs:
         with:
           version: 3.1.56
 
-      - name: Build with Official Makefile (WASM / SFNN)
+      - name: Compile YaneuraOu to WebAssembly
         working-directory: YaneuraOu/source
         run: |
-          make clean
-          make wasm \
-            EVAL_TYPE=NNUE_SFNN \
-            TARGET_CPU=WASM_SIMD \
-            YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE \
-            THREADS=OFF
+          # make clean で判明した正規のソースファイル群を収集
+          SOURCES=$(find . -name "*.cpp" \
+            ! -path "./test/*" \
+            ! -path "./extra/*" \
+            ! -path "./engine/dlshogi-engine/*" \
+            ! -path "./engine/help-mate-engine/*" \
+            ! -path "./engine/mate-engine/*" \
+            ! -path "./engine/tanuki-mate-engine/*" \
+            ! -path "./engine/yaneuraou-mate-engine/*" \
+            ! -path "./engine/user-engine/*" \
+            ! -path "./eval/deep/*" \
+            ! -path "./eval/material/*" \
+            ! -path "./eval/kppt/*" \
+            ! -path "./eval/kpp_kkpt/*")
 
-      - name: Check output files
-        working-directory: YaneuraOu/source
-        run: ls -la
+          em++ -O3 -std=c++17 \
+            -I. \
+            -DNDEBUG -DIS_64BIT \
+            -msimd128 -DUSE_WASM_SIMD \
+            -DYANEURAOU_ENGINE_NNUE \
+            -DEVAL_NNUE -DEVAL_NNUE_SFNN \
+            -DNO_THREAD -DUSE_MAKEFILE \
+            -s WASM=1 \
+            -s ALLOW_MEMORY_GROWTH=1 \
+            -s MODULARIZE=1 \
+            -s EXPORT_NAME="YaneuraOu" \
+            -s FORCE_FILESYSTEM=1 \
+            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
+            -o yaneuraou.js \
+            $SOURCES
 
       - name: Upload WASM Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: yaneuraou-wasm-files
           path: |
-            YaneuraOu/source/*.js
-            YaneuraOu/source/*.wasm
+            YaneuraOu/source/yaneuraou.js
+            YaneuraOu/source/yaneuraou.wasm
