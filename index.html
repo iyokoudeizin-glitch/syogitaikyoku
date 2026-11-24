@@ -246,11 +246,10 @@ let nodeIdCounter = 1;
 let wasmEngine = null;
 let isWasmReady = false;
 
-// yaneuraou.js のサイズ指定(893917)を nn.bin の実サイズに書き換えてから起動する
 async function initWasmEngine() {
   const statusEl = document.getElementById('engine-status');
   try {
-    statusEl.textContent = "エンジン状態: 評価関数 (nn.bin) を読み込み中...";
+    statusEl.textContent = "エンジン状態: 評価関数 (nn.bin) を確認中...";
     const nnRes = await fetch('nn.bin');
     if (!nnRes.ok) {
       throw new Error(`nn.bin が見つかりません (HTTP ${nnRes.status})`);
@@ -258,24 +257,56 @@ async function initWasmEngine() {
     const nnBuffer = await nnRes.arrayBuffer();
     const nnSize = nnBuffer.byteLength;
 
-    statusEl.textContent = "エンジン状態: yaneuraou.js を構成中...";
+    statusEl.textContent = "エンジン状態: yaneuraou.js を最適化中...";
     const jsRes = await fetch('yaneuraou.js');
     if (!jsRes.ok) {
       throw new Error(`yaneuraou.js が見つかりません (HTTP ${jsRes.status})`);
     }
     let jsCode = await jsRes.text();
-    // 元の893917バイト固定指定を nn.bin の実サイズに置換
+
+    // 1. yaneuraou.data の参照をすべて nn.bin に直接書き換えて 404 を防ぐ
+    jsCode = jsCode.replace(/yaneuraou\.data/g, 'nn.bin');
+    // 2. サイズ指定(893917)を nn.bin の実際のバイト数に書き換える
     jsCode = jsCode.replace(/893917/g, String(nnSize));
 
-    // 動的にスクリプトを実行して YaneuraOu 関数を定義
-    const scriptEl = document.createElement('script');
-    scriptEl.textContent = jsCode;
-    document.head.appendChild(scriptEl);
+    // 3. yaneuraou.worker.js がリポジトリに無い場合でも動作するよう、Worker用コードをBlob生成
+    const baseUrl = location.href.substring(0, location.href.lastIndexOf('/') + 1);
+    const workerCode = `
+      var Module = { ENVIRONMENT_IS_PTHREAD: true };
+      self.onmessage = function(e) {
+        if (e.data.cmd === 'load') {
+          Module.wasmMemory = e.data.wasmMemory;
+          Module.buffer = Module.wasmMemory.buffer;
+          Module.ENVIRONMENT_IS_PTHREAD = true;
+          importScripts('${baseUrl}yaneuraou.js');
+          YaneuraOu(Module).then(function(inst) {
+            self.postMessage({ cmd: 'loaded' });
+          });
+        }
+      };
+    `;
+    const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(workerBlob);
+
+    // 動的スクリプトの起点URLを正しく認識させるために Blob URL として読み込む
+    const patchedJsBlob = new Blob([jsCode], { type: 'application/javascript' });
+    const patchedJsUrl = URL.createObjectURL(patchedJsBlob);
+
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = patchedJsUrl;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error("yaneuraou.js の読み込みに失敗しました"));
+      document.head.appendChild(s);
+    });
 
     statusEl.textContent = "エンジン状態: WASMエンジンを起動中...";
     const engine = await YaneuraOu({
-      // yaneuraou.data へのネットワーク通信を完全に遮断し、メモリ上の nn.bin を直接渡す
-      getPreloadedPackage: function(remotePackageName, remotePackageSize) {
+      locateFile: function(path) {
+        if (path.endsWith('.worker.js')) return workerUrl;
+        return baseUrl + path;
+      },
+      getPreloadedPackage: function() {
         return nnBuffer;
       }
     });
