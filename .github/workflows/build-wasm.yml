@@ -18,41 +18,24 @@ jobs:
         with:
           version: 3.1.56
 
-      - name: Compile to WebAssembly (Auto-detect sources)
+      - name: Build with Official Makefile (WASM / SFNN)
         working-directory: YaneuraOu/source
         run: |
-          # 必要なC++ソースファイルを自動収集（テストや他エンジン用を除外）
-          SOURCES=$(find . -name "*.cpp" \
-            ! -path "./test/*" \
-            ! -path "./extra/*" \
-            ! -path "./engine/help-mate-engine/*" \
-            ! -path "./engine/mate-engine/*" \
-            ! -path "./engine/user-engine/*" \
-            ! -path "./eval/material/*" \
-            ! -path "./eval/kppt/*" \
-            ! -path "./eval/kpp_kkpt/*")
+          make clean
+          make wasm \
+            EVAL_TYPE=NNUE_SFNN \
+            TARGET_CPU=WASM_SIMD \
+            YANEURAOU_EDITION=YANEURAOU_ENGINE_NNUE \
+            THREADS=OFF
 
-          echo "Compiling sources:"
-          echo "$SOURCES"
-
-          em++ -O3 -std=c++17 \
-            -I. \
-            -DNDEBUG -DIS_64BIT -DUSE_SSE2 -msimd128 \
-            -DEVAL_NNUE -DEVAL_NNUE_SFNN \
-            -DNO_THREAD \
-            -s WASM=1 \
-            -s ALLOW_MEMORY_GROWTH=1 \
-            -s MODULARIZE=1 \
-            -s EXPORT_NAME="YaneuraOu" \
-            -s FORCE_FILESYSTEM=1 \
-            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","FS"]' \
-            -o yaneuraou.js \
-            $SOURCES
+      - name: Check output files
+        working-directory: YaneuraOu/source
+        run: ls -la
 
       - name: Upload WASM Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: yaneuraou-wasm-files
           path: |
-            YaneuraOu/source/yaneuraou.js
-            YaneuraOu/source/yaneuraou.wasm
+            YaneuraOu/source/*.js
+            YaneuraOu/source/*.wasm
