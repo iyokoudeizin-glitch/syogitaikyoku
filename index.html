@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Web将棋スタジオ - 対局・検討・棋譜編集（つようら王11mini搭載）</title>
-<!-- GitHub PagesでSharedArrayBuffer(WASMマルチスレッド)を有効化するスクリプト -->
 <script src="coi-serviceworker.js"></script>
 <script src="yaneuraou.js"></script>
 <style>
@@ -248,7 +247,7 @@ let nodeIdCounter = 1;
 let wasmEngine = null;
 let isWasmReady = false;
 
-// つようら王11mini (nn.bin) を取得してWASMエンジンの /eval/nn.bin にマウントして起動
+// つようら王11mini (nn.bin) を取得し、yaneuraou.data の通信をバイパスして起動
 async function initWasmEngine() {
   const statusEl = document.getElementById('engine-status');
   if (typeof YaneuraOu === 'undefined') {
@@ -258,25 +257,24 @@ async function initWasmEngine() {
 
   try {
     statusEl.textContent = "エンジン状態: 評価関数 (nn.bin) を読み込み中...";
-    let nnData = null;
-    try {
-      const res = await fetch('nn.bin');
-      if (res.ok) {
-        nnData = new Uint8Array(await res.arrayBuffer());
-      }
-    } catch (e) {
-      console.warn("nn.bin の個別取得をスキップ:", e);
+    const res = await fetch('nn.bin');
+    if (!res.ok) {
+      throw new Error(`nn.bin が見つかりません (HTTP ${res.status})`);
     }
+    const nnBuffer = await res.arrayBuffer();
+    const nnBytes = new Uint8Array(nnBuffer);
 
     statusEl.textContent = "エンジン状態: WASMエンジンを起動中...";
     const engine = await YaneuraOu({
-      // yaneuraou.data がない場合でも nn.bin を優先注入できるようにフック
+      // yaneuraou.data をネットから取得する処理をバイパスし、ダミー空データを返す
+      getPreloadedPackage: function() {
+        return new ArrayBuffer(0);
+      },
+      // 仮想ファイルシステムに本物の nn.bin (つようら王11mini) を配置
       preRun: [function(mod) {
-        if (nnData) {
-          try { mod.FS_createPath("/", "eval", true, true); } catch(e) {}
-          try { mod.FS_unlink("/eval/nn.bin"); } catch(e) {}
-          mod.FS_createDataFile("/eval", "nn.bin", nnData, true, true, true);
-        }
+        try { mod.FS_createPath("/", "eval", true, true); } catch(e) {}
+        try { mod.FS_unlink("/eval/nn.bin"); } catch(e) {}
+        mod.FS_createDataFile("/eval", "nn.bin", nnBytes, true, true, true);
       }]
     });
 
@@ -285,7 +283,7 @@ async function initWasmEngine() {
     wasmEngine.postMessage('usi');
   } catch (err) {
     console.error("WASM起動エラー:", err);
-    statusEl.textContent = "エンジン状態: WASM起動エラー（内蔵AIへ自動切替）";
+    statusEl.textContent = `エンジン状態: ${err.message}（内蔵AIへ切替）`;
     document.getElementById('ai-level').value = '2';
   }
 }
@@ -331,7 +329,6 @@ function handleEngineMessage(line) {
   }
 }
 
-// USI形式の指し手（例: 7g7f, 8h2b+, P*5e）を盤面に適用
 function applyUsiMove(usi) {
   const files = '987654321';
   const ranks = 'abcdefghi';
