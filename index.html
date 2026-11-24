@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Web将棋スタジオ - 対局・検討・棋譜編集</title>
+<title>Web将棋スタジオ - 対局・検討・棋譜編集（つようら王11mini搭載）</title>
+<!-- GitHub PagesでSharedArrayBuffer(WASMマルチスレッド)を有効化するスクリプト -->
+<script src="coi-serviceworker.js"></script>
+<script src="yaneuraou.js"></script>
 <style>
   :root {
     --bg: #1e1e24;
@@ -35,7 +38,6 @@
     display: flex; flex: 1; padding: 16px; gap: 20px; justify-content: center; align-items: flex-start; flex-wrap: wrap;
   }
 
-  /* 盤面エリア */
   .board-section { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   .hand-box {
     width: 100%; max-width: 450px; min-height: 46px; background: var(--panel); border-radius: 6px;
@@ -66,7 +68,6 @@
   .gote-piece { display: inline-block; transform: rotate(180deg); }
   .promoted { color: #b81d13; }
 
-  /* 評価値バー */
   .eval-bar-container {
     width: 100%; max-width: 450px; height: 22px; background: #222; border-radius: 4px; overflow: hidden;
     display: flex; position: relative; border: 1px solid #555;
@@ -78,7 +79,6 @@
     font-weight: bold; text-shadow: 1px 1px 2px #000;
   }
 
-  /* 右パネル（棋譜・編集・AI設定） */
   .side-panel {
     width: 100%; max-width: 420px; background: var(--panel); border-radius: 8px; padding: 14px;
     border: 1px solid #444; display: flex; flex-direction: column; gap: 12px;
@@ -107,11 +107,10 @@
   button.btn-danger { background: var(--danger); }
   button.btn-success { background: var(--success); }
 
-  textarea, input[type="text"], select {
+  input[type="text"], select {
     width: 100%; background: #18181f; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 6px; font-size: 0.85rem;
   }
 
-  /* 成り選択モーダル */
   #promote-modal {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 100;
     justify-content: center; align-items: center;
@@ -134,25 +133,21 @@
 </header>
 
 <main>
-  <!-- 左側：盤面・持ち駒・評価値 -->
   <div class="board-section">
-    <div class="eval-bar-container" id="eval-container">
+    <div class="eval-bar-container">
       <div class="eval-sente" id="eval-sente" style="width: 50%;"></div>
       <div class="eval-gote"></div>
-      <div class="eval-text" id="eval-text">互角 (0) | エンジン待機中</div>
+      <div class="eval-text" id="eval-text">互角 (0) | エンジン初期化中...</div>
     </div>
 
-    <!-- 後手持ち駒 -->
     <div class="hand-box" id="gote-hand">
       <span class="hand-label">☖ 後手 持駒:</span>
     </div>
 
-    <!-- 将棋盤 -->
     <div class="board-wrapper">
       <table class="shogi-board" id="board"></table>
     </div>
 
-    <!-- 先手持ち駒 -->
     <div class="hand-box" id="sente-hand">
       <span class="hand-label">☗ 先手 持駒:</span>
     </div>
@@ -166,22 +161,20 @@
     </div>
   </div>
 
-  <!-- 右側：棋譜ツリー・編集・AI/オンライン設定 -->
   <div class="side-panel">
-    <!-- モード別コントロール -->
-    <div class="panel-box" id="mode-panel">
+    <div class="panel-box">
       <h3 id="mode-title">1vAI対局設定（つようら王11mini対応）</h3>
       <div id="ai-controls">
         <div class="controls-row" style="margin-bottom:8px;">
           <select id="ai-level" style="width:auto; flex:1;">
-            <option value="1">AI強さ: 入門 (内蔵探索 Lv1)</option>
-            <option value="2" selected>AI強さ: 初級 (内蔵探索 Lv2)</option>
-            <option value="wasm">外部WASMエンジン (つようら王11mini)</option>
+            <option value="wasm" selected>つようら王11mini (WASMエンジン)</option>
+            <option value="2">内蔵軽量AI (オフライン予備 Lv2)</option>
+            <option value="1">内蔵軽量AI (オフライン予備 Lv1)</option>
           </select>
           <button class="btn btn-primary" onclick="triggerAIMove()">AIに指させる</button>
         </div>
-        <div style="font-size:0.78rem; color:#aaa;">
-          ※「つようら王11mini」を使用する場合は、同一フォルダに <code>yaneuraou.js</code> と評価関数 <code>nn.bin</code> を配置すると自動認識します。
+        <div id="engine-status" style="font-size:0.78rem; color:#8ecae6;">
+          エンジン状態: 起動待機中...
         </div>
       </div>
 
@@ -201,7 +194,6 @@
       </div>
     </div>
 
-    <!-- 棋譜ツリー・分岐リスト -->
     <div class="panel-box">
       <h3>棋譜・分岐手順（クリックで移動 / 途中から指すと分岐作成）</h3>
       <div class="kifu-list" id="kifu-list"></div>
@@ -210,7 +202,6 @@
       </div>
     </div>
 
-    <!-- 棋譜保存・読込・エクスポート -->
     <div class="panel-box">
       <h3>棋譜の保存・編集・入出力</h3>
       <div class="controls-row" style="margin-bottom:8px;">
@@ -227,7 +218,6 @@
   </div>
 </main>
 
-<!-- 成・不成選択モーダル -->
 <div id="promote-modal">
   <div class="modal-card">
     <p>駒を成りますか？</p>
@@ -237,75 +227,129 @@
 </div>
 
 <script>
-/**
- * 将棋エンジン＆棋譜ツリー管理システム
- */
 const PIECE_NAMES = {
   P: '歩', L: '香', N: '桂', S: '銀', G: '金', B: '角', R: '飛', K: '玉',
   '+P': 'と', '+L': '成香', '+N': '成桂', '+S': '成銀', '+B': '馬', '+R': '龍'
 };
 const HAND_ORDER = ['R', 'B', 'G', 'S', 'N', 'L', 'P'];
 const PROMOTABLE = ['P', 'L', 'N', 'S', 'B', 'R'];
-
-// 初期盤面 SFEN
 const INITIAL_SFEN = "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 
-let appMode = 'ai'; // 'ai' | 'pvp' | 'study'
+let appMode = 'ai';
 let isFlipped = false;
-let selected = null; // { type: 'board', r, c } or { type: 'hand', piece }
+let selected = null;
 let legalMovesCache = [];
 let pendingMove = null;
 
-// 棋譜ツリー構造
 let rootNode = null;
 let currentNode = null;
 let nodeIdCounter = 1;
 
-// 外部WASMエンジン用Worker（つようら王11mini連携用）
 let wasmEngine = null;
 let isWasmReady = false;
 
-function initWasmEngine() {
+// つようら王11mini (nn.bin) を取得してWASMエンジンの /eval/nn.bin にマウントして起動
+async function initWasmEngine() {
+  const statusEl = document.getElementById('engine-status');
+  if (typeof YaneuraOu === 'undefined') {
+    statusEl.textContent = "エンジン状態: yaneuraou.js 未検出（内蔵AIで動作）";
+    return;
+  }
+
   try {
-    // 同一ディレクトリに yaneuraou.js と nn.bin が配置されている場合に起動
-    if (typeof YaneuraOu !== 'undefined') {
-      YaneuraOu().then(engine => {
-        wasmEngine = engine;
-        wasmEngine.addMessageListener(handleEngineMessage);
-        wasmEngine.postMessage('usi');
-      });
+    statusEl.textContent = "エンジン状態: 評価関数 (nn.bin) を読み込み中...";
+    let nnData = null;
+    try {
+      const res = await fetch('nn.bin');
+      if (res.ok) {
+        nnData = new Uint8Array(await res.arrayBuffer());
+      }
+    } catch (e) {
+      console.warn("nn.bin の個別取得をスキップ:", e);
     }
-  } catch (e) {
-    console.log("内蔵AIモードで動作中");
+
+    statusEl.textContent = "エンジン状態: WASMエンジンを起動中...";
+    const engine = await YaneuraOu({
+      // yaneuraou.data がない場合でも nn.bin を優先注入できるようにフック
+      preRun: [function(mod) {
+        if (nnData) {
+          try { mod.FS_createPath("/", "eval", true, true); } catch(e) {}
+          try { mod.FS_unlink("/eval/nn.bin"); } catch(e) {}
+          mod.FS_createDataFile("/eval", "nn.bin", nnData, true, true, true);
+        }
+      }]
+    });
+
+    wasmEngine = engine;
+    wasmEngine.addMessageListener(handleEngineMessage);
+    wasmEngine.postMessage('usi');
+  } catch (err) {
+    console.error("WASM起動エラー:", err);
+    statusEl.textContent = "エンジン状態: WASM起動エラー（内蔵AIへ自動切替）";
+    document.getElementById('ai-level').value = '2';
   }
 }
 
 function handleEngineMessage(line) {
+  const statusEl = document.getElementById('engine-status');
   if (line === 'usiok') {
-    wasmEngine.postMessage('setoption name EvalFile value nn.bin');
+    wasmEngine.postMessage('setoption name EvalDir value eval');
+    wasmEngine.postMessage('setoption name Threads value 1');
     wasmEngine.postMessage('isready');
   } else if (line === 'readyok') {
     isWasmReady = true;
-    updateEvalDisplay(0, "つようら王11mini 準備完了");
-  } else if (line.startsWith('info') && line.includes('score cp')) {
+    statusEl.textContent = "エンジン状態: つようら王11mini 準備完了！";
+    updateEvalDisplay(0, "互角 (0) | つようら王11mini 待機中");
+  } else if (line.startsWith('info') && line.includes('score')) {
     const cpMatch = line.match(/score cp (-?\d+)/);
+    const mateMatch = line.match(/score mate (-?\d+)/);
     const pvMatch = line.match(/pv (.+)/);
+
+    let score = 0;
+    let label = '';
     if (cpMatch) {
-      let score = parseInt(cpMatch[1], 10);
+      score = parseInt(cpMatch[1], 10);
       if (currentNode.state.turn === 'w') score = -score;
-      const pv = pvMatch ? pvMatch[1] : '';
-      updateEvalDisplay(score, `評価値: ${score > 0 ? '+' : ''}${score}`);
-      document.getElementById('pv-display').textContent = `読み筋: ${pv}`;
+      label = `評価値: ${score > 0 ? '先手有利 +' : score < 0 ? '後手有利 ' : '互角 '}${score}`;
+    } else if (mateMatch) {
+      const mate = parseInt(mateMatch[1], 10);
+      const isSenteWin = (currentNode.state.turn === 'b' && mate > 0) || (currentNode.state.turn === 'w' && mate < 0);
+      score = isSenteWin ? 2000 : -2000;
+      label = `詰み発見: ${Math.abs(mate)}手詰`;
+    }
+    if (label) updateEvalDisplay(score, label);
+    if (pvMatch) {
+      document.getElementById('pv-display').textContent = `読み筋(USI): ${pvMatch[1]}`;
     }
   } else if (line.startsWith('bestmove')) {
     const moveStr = line.split(' ')[1];
     if (moveStr && moveStr !== 'resign' && appMode === 'ai') {
       applyUsiMove(moveStr);
+    } else if (moveStr === 'resign') {
+      alert("AIが投了しました！");
     }
   }
 }
 
-// SFENパーサ
+// USI形式の指し手（例: 7g7f, 8h2b+, P*5e）を盤面に適用
+function applyUsiMove(usi) {
+  const files = '987654321';
+  const ranks = 'abcdefghi';
+  if (usi[1] === '*') {
+    const piece = usi[0].toUpperCase();
+    const c = files.indexOf(usi[2]);
+    const r = ranks.indexOf(usi[3]);
+    executeMove({ drop: piece, to: { r, c } });
+  } else {
+    const fc = files.indexOf(usi[0]);
+    const fr = ranks.indexOf(usi[1]);
+    const tc = files.indexOf(usi[2]);
+    const tr = ranks.indexOf(usi[3]);
+    const promote = usi.endsWith('+');
+    executeMove({ from: { r: fr, c: fc }, to: { r: tr, c: tc }, promote });
+  }
+}
+
 function parseSfen(sfen) {
   const parts = sfen.trim().split(/\s+/);
   const rows = parts[0].split('/');
@@ -349,7 +393,6 @@ function parseSfen(sfen) {
   return { board, turn, hands, ply };
 }
 
-// SFENジェネレータ
 function toSfen(state) {
   let rows = [];
   for (let r = 0; r < 9; r++) {
@@ -386,7 +429,6 @@ function cloneState(state) {
   return JSON.parse(JSON.stringify(state));
 }
 
-// 合法手生成（簡易チェック＋二歩判定込み）
 function getPseudoMoves(state, r, c) {
   const p = state.board[r][c];
   if (!p || p.owner !== state.turn) return [];
@@ -454,7 +496,6 @@ function getDropTargets(state, pieceType) {
   const targets = [];
   const owner = state.turn;
   for (let r = 0; r < 9; r++) {
-    // 行き所のない駒の制限
     if (pieceType === 'P' || pieceType === 'L') {
       if ((owner === 'b' && r === 0) || (owner === 'w' && r === 8)) continue;
     }
@@ -463,7 +504,6 @@ function getDropTargets(state, pieceType) {
     }
     for (let c = 0; c < 9; c++) {
       if (state.board[r][c]) continue;
-      // 二歩チェック
       if (pieceType === 'P') {
         let hasPawn = false;
         for (let rr = 0; rr < 9; rr++) {
@@ -478,7 +518,6 @@ function getDropTargets(state, pieceType) {
   return targets;
 }
 
-// 指し手実行と棋譜ツリー追加
 function executeMove(move) {
   const state = cloneState(currentNode.state);
   const owner = state.turn;
@@ -508,7 +547,6 @@ function executeMove(move) {
   state.turn = owner === 'b' ? 'w' : 'b';
   state.ply++;
 
-  // 既存の子ノードに同じ手があればそこへ移動（重複分岐防止）
   const existing = currentNode.children.find(ch => ch.kifu === kifuText);
   if (existing) {
     currentNode = existing;
@@ -531,13 +569,11 @@ function executeMove(move) {
   legalMovesCache = [];
   renderAll();
 
-  // AIモードで後手番になったらAI思考
   if (appMode === 'ai' && currentNode.state.turn === 'w') {
-    setTimeout(triggerAIMove, 250);
+    setTimeout(triggerAIMove, 200);
   }
 }
 
-// 内蔵評価関数＆探索AI（WASM未配置時のフォールバック兼高速応答用）
 const PIECE_VALUES = {
   P: 100, L: 300, N: 350, S: 500, G: 600, B: 800, R: 950, K: 15000,
   '+P': 550, '+L': 550, '+N': 550, '+S': 550, '+B': 1100, '+R': 1300
@@ -572,15 +608,10 @@ function generateAllMoves(state) {
         for (const to of targets) {
           const canProm = PROMOTABLE.includes(p.type) &&
             ((p.owner === 'b' && (r <= 2 || to.r <= 2)) || (p.owner === 'w' && (r >= 6 || to.r >= 6)));
-          if (canProm) {
-            all.push({ from: { r, c }, to, promote: true });
-          }
-          // 強制成りチェック
+          if (canProm) all.push({ from: { r, c }, to, promote: true });
           const mustProm = (p.type === 'P' || p.type === 'L') && ((p.owner === 'b' && to.r === 0) || (p.owner === 'w' && to.r === 8)) ||
                            (p.type === 'N') && ((p.owner === 'b' && to.r <= 1) || (p.owner === 'w' && to.r >= 7));
-          if (!mustProm) {
-            all.push({ from: { r, c }, to, promote: false });
-          }
+          if (!mustProm) all.push({ from: { r, c }, to, promote: false });
         }
       }
     }
@@ -598,6 +629,7 @@ function generateAllMoves(state) {
 function triggerAIMove() {
   const level = document.getElementById('ai-level').value;
   if (level === 'wasm' && isWasmReady && wasmEngine) {
+    document.getElementById('eval-text').textContent = "つようら王11mini 思考中...";
     wasmEngine.postMessage(`position sfen ${currentNode.sfen}`);
     wasmEngine.postMessage('go movetime 1500');
     return;
@@ -617,7 +649,6 @@ function triggerAIMove() {
     const sim = simulateMove(currentNode.state, m);
     let score = evaluateBoard(sim) + (Math.random() * 30 - 15);
     if (level === '2') {
-      // 1手読み返し（相手の最善応手）
       const replies = generateAllMoves(sim);
       let worstReply = isMax ? 999999 : -999999;
       for (let i = 0; i < Math.min(replies.length, 25); i++) {
@@ -658,22 +689,23 @@ function simulateMove(state, move) {
 
 function runAnalysis() {
   if (isWasmReady && wasmEngine) {
+    document.getElementById('eval-text').textContent = "つようら王11mini 検討中...";
     wasmEngine.postMessage(`position sfen ${currentNode.sfen}`);
-    wasmEngine.postMessage('go movetime 2000');
+    wasmEngine.postMessage('go movetime 2500');
   } else {
     const score = evaluateBoard(currentNode.state);
     updateEvalDisplay(score, `評価値: ${score > 0 ? '+' : ''}${score} (内蔵評価)`);
-    document.getElementById('pv-display').textContent = "読み筋: 駒得・玉の安全度ベースの静的評価完了（WASM配置で深層読み筋を表示）";
   }
 }
 
-// UI描画関連
 function renderAll() {
   renderBoard();
   renderHands();
   renderKifuTree();
-  const score = evaluateBoard(currentNode.state);
-  updateEvalDisplay(score, `形勢評価: ${score > 0 ? '先手有利 +' : score < 0 ? '後手有利 ' : '互角 '}${score}`);
+  if (!isWasmReady) {
+    const score = evaluateBoard(currentNode.state);
+    updateEvalDisplay(score, `形勢評価: ${score > 0 ? '先手有利 +' : score < 0 ? '後手有利 ' : '互角 '}${score}`);
+  }
   document.getElementById('node-comment').value = currentNode.comment || '';
 }
 
@@ -698,15 +730,9 @@ function renderBoard() {
       const td = document.createElement('td');
       const p = state.board[r][c];
 
-      if (selected && selected.type === 'board' && selected.r === r && selected.c === c) {
-        td.classList.add('selected');
-      }
-      if (lastTo && lastTo.r === r && lastTo.c === c) {
-        td.classList.add('last-move');
-      }
-      if (legalMovesCache.some(m => m.r === r && m.c === c)) {
-        td.classList.add('can-move');
-      }
+      if (selected && selected.type === 'board' && selected.r === r && selected.c === c) td.classList.add('selected');
+      if (lastTo && lastTo.r === r && lastTo.c === c) td.classList.add('last-move');
+      if (legalMovesCache.some(m => m.r === r && m.c === c)) td.classList.add('can-move');
 
       if (p) {
         const span = document.createElement('span');
@@ -733,9 +759,7 @@ function renderHands() {
       if (cnt > 0) {
         const btn = document.createElement('span');
         btn.className = 'hand-piece';
-        if (selected && selected.type === 'hand' && selected.owner === owner && selected.piece === t) {
-          btn.classList.add('selected');
-        }
+        if (selected && selected.type === 'hand' && selected.owner === owner && selected.piece === t) btn.classList.add('selected');
         btn.textContent = `${PIECE_NAMES[t]}${cnt > 1 ? cnt : ''}`;
         btn.onclick = () => onHandClick(owner, t);
         el.appendChild(btn);
@@ -746,7 +770,6 @@ function renderHands() {
 
 function onCellClick(r, c) {
   const state = currentNode.state;
-  // 移動先クリック判定
   if (selected && legalMovesCache.some(m => m.r === r && m.c === c)) {
     if (selected.type === 'hand') {
       executeMove({ drop: selected.piece, to: { r, c } });
@@ -770,7 +793,6 @@ function onCellClick(r, c) {
     return;
   }
 
-  // 自分の駒を選択
   const p = state.board[r][c];
   if (p && p.owner === state.turn) {
     selected = { type: 'board', r, c };
@@ -799,7 +821,6 @@ function resolvePromotion(promote) {
   }
 }
 
-// 棋譜ツリー描画・操作
 function renderKifuTree() {
   const list = document.getElementById('kifu-list');
   list.innerHTML = '';
@@ -826,30 +847,11 @@ function renderKifuTree() {
   traverse(rootNode, 0, false);
 }
 
-function stepBack() {
-  if (currentNode.parent) {
-    currentNode = currentNode.parent;
-    renderAll();
-  }
-}
-function stepForward() {
-  if (currentNode.children.length > 0) {
-    currentNode = currentNode.children[0];
-    renderAll();
-  }
-}
-function jumpToStart() {
-  currentNode = rootNode;
-  renderAll();
-}
-function flipBoard() {
-  isFlipped = !isFlipped;
-  renderBoard();
-}
-function updateComment(text) {
-  currentNode.comment = text;
-  renderKifuTree();
-}
+function stepBack() { if (currentNode.parent) { currentNode = currentNode.parent; renderAll(); } }
+function stepForward() { if (currentNode.children.length > 0) { currentNode = currentNode.children[0]; renderAll(); } }
+function jumpToStart() { currentNode = rootNode; renderAll(); }
+function flipBoard() { isFlipped = !isFlipped; renderBoard(); }
+function updateComment(text) { currentNode.comment = text; renderKifuTree(); }
 function deleteCurrentBranch() {
   if (!currentNode.parent) return alert("開始局面は削除できません");
   const parent = currentNode.parent;
@@ -858,7 +860,6 @@ function deleteCurrentBranch() {
   renderAll();
 }
 
-// モード切替
 function setMode(mode) {
   appMode = mode;
   ['ai', 'pvp', 'study'].forEach(m => {
@@ -873,12 +874,8 @@ function setMode(mode) {
   document.getElementById('mode-title').textContent = titles[mode];
 }
 
-// 保存・エクスポート
 function serializeTree(node) {
-  return {
-    kifu: node.kifu, move: node.move, sfen: node.sfen, comment: node.comment,
-    children: node.children.map(serializeTree)
-  };
+  return { kifu: node.kifu, move: node.move, sfen: node.sfen, comment: node.comment, children: node.children.map(serializeTree) };
 }
 function deserializeTree(data, parent = null) {
   const node = {
@@ -950,9 +947,8 @@ function resetGame() {
   renderAll();
 }
 
-// 起動処理
 resetGame();
-initWasmEngine();
+window.addEventListener('load', initWasmEngine);
 </script>
 </body>
 </html>
