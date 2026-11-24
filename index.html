@@ -249,7 +249,7 @@ let isWasmReady = false;
 async function initWasmEngine() {
   const statusEl = document.getElementById('engine-status');
   try {
-    statusEl.textContent = "エンジン状態: 評価関数 (nn.bin) を確認中...";
+    statusEl.textContent = "エンジン状態: 評価関数 (nn.bin) を読み込み中...";
     const nnRes = await fetch('nn.bin');
     if (!nnRes.ok) {
       throw new Error(`nn.bin が見つかりません (HTTP ${nnRes.status})`);
@@ -257,20 +257,38 @@ async function initWasmEngine() {
     const nnBuffer = await nnRes.arrayBuffer();
     const nnSize = nnBuffer.byteLength;
 
-    statusEl.textContent = "エンジン状態: yaneuraou.js を最適化中...";
+    // yaneuraou.data への XMLHttpRequest を横取りし、通信せずにメモリ上の nn.bin を即座に返すフック
+    const origOpen = XMLHttpRequest.prototype.open;
+    const origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+      this._interceptUrl = String(url);
+      return origOpen.call(this, method, url, ...rest);
+    };
+    XMLHttpRequest.prototype.send = function(body) {
+      if (this._interceptUrl && this._interceptUrl.includes('yaneuraou.data')) {
+        setTimeout(() => {
+          Object.defineProperty(this, 'status', { value: 200 });
+          Object.defineProperty(this, 'response', { value: nnBuffer });
+          if (this.onload) this.onload();
+        }, 10);
+        return;
+      }
+      return origSend.call(this, body);
+    };
+
+    statusEl.textContent = "エンジン状態: yaneuraou.js を読み込み中...";
     const jsRes = await fetch('yaneuraou.js');
     if (!jsRes.ok) {
       throw new Error(`yaneuraou.js が見つかりません (HTTP ${jsRes.status})`);
     }
     let jsCode = await jsRes.text();
-
-    // 1. yaneuraou.data の参照をすべて nn.bin に直接書き換えて 404 を防ぐ
-    jsCode = jsCode.replace(/yaneuraou\.data/g, 'nn.bin');
-    // 2. サイズ指定(893917)を nn.bin の実際のバイト数に書き換える
+    // 元の893917バイト固定指定を nn.bin の実サイズに書き換える
     jsCode = jsCode.replace(/893917/g, String(nnSize));
 
-    // 3. yaneuraou.worker.js がリポジトリに無い場合でも動作するよう、Worker用コードをBlob生成
     const baseUrl = location.href.substring(0, location.href.lastIndexOf('/') + 1);
+    const patchedJsUrl = URL.createObjectURL(new Blob([jsCode], { type: 'application/javascript' }));
+
+    // Worker用スクリプトの自動生成（yaneuraou.worker.js 不在対策）
     const workerCode = `
       var Module = { ENVIRONMENT_IS_PTHREAD: true };
       self.onmessage = function(e) {
@@ -278,25 +296,20 @@ async function initWasmEngine() {
           Module.wasmMemory = e.data.wasmMemory;
           Module.buffer = Module.wasmMemory.buffer;
           Module.ENVIRONMENT_IS_PTHREAD = true;
-          importScripts('${baseUrl}yaneuraou.js');
-          YaneuraOu(Module).then(function(inst) {
+          importScripts('${patchedJsUrl}');
+          YaneuraOu(Module).then(function() {
             self.postMessage({ cmd: 'loaded' });
           });
         }
       };
     `;
-    const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
-    const workerUrl = URL.createObjectURL(workerBlob);
-
-    // 動的スクリプトの起点URLを正しく認識させるために Blob URL として読み込む
-    const patchedJsBlob = new Blob([jsCode], { type: 'application/javascript' });
-    const patchedJsUrl = URL.createObjectURL(patchedJsBlob);
+    const workerUrl = URL.createObjectURL(new Blob([workerCode], { type: 'application/javascript' }));
 
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = patchedJsUrl;
       s.onload = resolve;
-      s.onerror = () => reject(new Error("yaneuraou.js の読み込みに失敗しました"));
+      s.onerror = () => reject(new Error("yaneuraou.js の実行に失敗しました"));
       document.head.appendChild(s);
     });
 
@@ -305,9 +318,6 @@ async function initWasmEngine() {
       locateFile: function(path) {
         if (path.endsWith('.worker.js')) return workerUrl;
         return baseUrl + path;
-      },
-      getPreloadedPackage: function() {
-        return nnBuffer;
       }
     });
 
